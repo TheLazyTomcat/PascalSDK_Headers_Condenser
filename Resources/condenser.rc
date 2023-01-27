@@ -1,0 +1,2 @@
+header_files RCDATA "header_files.txt"
+out_template RCDATA "out_template.txt"

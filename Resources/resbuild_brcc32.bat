@@ -1,0 +1,1 @@
+brcc32 -fo condenser.res    condenser.rc
