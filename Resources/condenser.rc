@@ -1,2 +1,3 @@
-header_files RCDATA "header_files.txt"
-out_template RCDATA "out_template.txt"
+source_files  RCDATA "source_files.txt"
+defines_files RCDATA "defines_files.txt" 
+out_template  RCDATA "out_template.txt"
