@@ -10,36 +10,49 @@ interface
 uses
   SysUtils, Classes;
 
+{===============================================================================
+    Project-specific exceptions
+===============================================================================}
 type
   TCONDException = class(Exception);
 
-  TCONDInvalidUnitName = class(TCONDException);
+  TCONDMissingParameter = class(TCONDException);
+  TCONDInvalidParameter = class(TCONDException);
 
   TCONDInvalidParsingStage = class(TCONDException);
   TCONDInvalidParsingTag   = class(TCONDException);
 
+{===============================================================================
+--------------------------------------------------------------------------------
+                                 TCondenserClass
+--------------------------------------------------------------------------------
+===============================================================================}
+{===============================================================================
+    TCondenserClass - class declaration
+===============================================================================}
 type
   TCondenserClass = class(TObject)
   protected
-    // paramters
-    fAddSplitters:        Boolean;
-    fAddUnitDescription:  Boolean;
-    fDebugRun:            Boolean;
-    // lists
-    fSourceFiles:         TStringList;  // as loaded from resources
-    fDefinesFiles:        TStringList;
+    // input parameters
+    fSourceFiles:         TStringList;
     fOutTemplate:         TStringList;
-    // runtime variables
+    fOutFileName:         String;
     fUnitName:            String;
+    fAddSplitters:        Boolean;
+    fDebugRun:            Boolean;
+    fDefinesFiles:        TStringList;
+    fDescriptionFile:     String;
+    // runtime variables
+    fCanRun:              Boolean; 
     // runtime lists (condensed lines)
     fCondDescription:     TStringList;
     fCondDefines:         TStringList;
     fCondInterface:       TStringList;
     fCondImplementation:  TStringList;
     fCondInitialization:  TStringList;
-    class procedure LoadStringsFromResources(const ResName: String; Strings: TStrings); virtual;
-    class Function CheckUnitName(const UnitName: String): Boolean; virtual;
-    procedure ParseDefinesFile(Lines: TStrings); virtual;
+    fCondFinalization:    TStringList;
+    procedure ParseDescriptionFile; virtual;
+    procedure ParseDefinesFiles; virtual;
     procedure ParseFile(const FileName: String; Lines: TStrings; IsFirst: Boolean); virtual;
     procedure ConstructOutput(OutLines: TStrings); virtual;
     procedure Initialize; virtual;
@@ -47,15 +60,54 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Run(const UnitName: String); virtual;
+    procedure Run; virtual;
     property AddSplitters: Boolean read fAddSplitters write fAddSplitters;
-    property AddUnitDescription: Boolean read fAddUnitDescription write fAddUnitDescription;
     property DebugRun: Boolean read fDebugRun write fDebugRun;
+    property CanRun: Boolean read fCanRun;
   end;
 
 implementation
 
-{$R 'Resources\condenser.res'}
+uses
+  StrRect, SimpleCmdLineParser;
+
+{===============================================================================
+--------------------------------------------------------------------------------
+                                 TCondenserClass
+--------------------------------------------------------------------------------
+===============================================================================}
+{===============================================================================
+    TCondenserClass - implementation constants
+===============================================================================}
+const
+  // source tags
+  COND_SRCTAG_START_UNIT           = '(*<unit>*)';
+  COND_SRCTAG_END_UNIT             = '(*</unit>*)';
+  COND_SRCTAG_START_INTERFACE      = '(*<interface>*)';
+  COND_SRCTAG_END_INTERFACE        = '(*</interface>*)';
+  COND_SRCTAG_START_IMPLEMENTATION = '(*<implementation>*)';
+  COND_SRCTAG_END_IMPLEMENTATION   = '(*</implementation>*)';
+  COND_SRCTAG_START_INITIALIZATION = '(*<initialization>*)';
+  COND_SRCTAG_END_INITIALIZATION   = '(*</initialization>*)';
+  COND_SRCTAG_START_FINALIZATION   = '(*<finalization>*)';
+  COND_SRCTAG_END_FINALIZATION     = '(*</finalization>*)';
+
+  // template tags
+  COND_TPLTAG_DESCRIPTION    = ('<description>');
+  COND_TPLTAG_UNITNAME       = ('<unit_name>');
+  COND_TPLTAG_DEFINES        = ('<defines>');
+  COND_TPLTAG_INTERFACE      = ('<interface>');
+  COND_TPLTAG_IMPLEMENTATION = ('<implementation>');
+  COND_TPLTAG_INITIALIZATION = ('<initialization>');
+  COND_TPLTAG_FINALIZATION   = ('<finalization>');
+
+  // defines tags
+  COND_DEFTAG_BODY_START = '(*<body>*)';
+  COND_DEFTAG_BODY_END   = '(*</body>*)';
+
+{===============================================================================
+    TCondenserClass - auxiliary functions
+===============================================================================}
 
 Function CharInSet(C: Char; S: TSysCharSet): Boolean;
 begin
@@ -66,6 +118,8 @@ else
 {$IFEND}
   Result := AnsiChar(C) in S;
 end;
+ 
+//------------------------------------------------------------------------------
 
 procedure TrimLines(Lines: TStrings);
 var
@@ -85,6 +139,8 @@ while Lines.Count > 0 do
     Break{while};
 end;
 
+//------------------------------------------------------------------------------
+
 procedure AppendLines(ToLines,FromLines: TStrings; Spacing: Boolean);
 var
   i:  Integer;
@@ -100,22 +156,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-class procedure TCondenserClass.LoadStringsFromResources(const ResName: String; Strings: TStrings);
-var
-  ResStream:  TResourceStream;
-begin
-ResStream := TResourceStream.Create(hInstance,ResName,PChar(10){RT_RCDATA});
-try
-  ResStream.Seek(0,soBeginning);
-  Strings.LoadFromStream(ResStream);
-finally
-  ResStream.Free;
-end;
-end;
-
-//------------------------------------------------------------------------------
-
-class Function TCondenserClass.CheckUnitName(const UnitName: String): Boolean;
+Function CheckUnitName(const UnitName: String): Boolean;
 var
   i:  Integer;
 begin
@@ -128,43 +169,76 @@ If (Length(UnitName) > 0) and (Length(UnitName) <= 128) then
 Result := True;
 end;
 
+{===============================================================================
+    TCondenserClass - class implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    TCondenserClass - protected methods
+-------------------------------------------------------------------------------}
+
+procedure TCondenserClass.ParseDescriptionFile;
+var
+  InLines:  TStringList;
+  Line:     Integer;
+begin
+InLines := TStringList.Create;
+try
+  InLines.LoadFromFile(StrToRTL(fDescriptionFile));
+  TrimLines(InLines);
+  For Line := 1 to Pred(InLines.Count) do
+    If not AnsiSameText(Trim(InLines[Line]),COND_SRCTAG_START_UNIT) then
+      fCondDescription.Add(InLines[Line])
+    else
+      Break{for i};
+finally
+  InLines.Free;
+end;
+end;
+
 //------------------------------------------------------------------------------
 
-procedure TCondenserClass.ParseDefinesFile(Lines: TStrings);
-const
-  COND_DEFTAG_BODY_START = '(*<body>*)';
-  COND_DEFTAG_BODY_END   = '(*</body>*)';
+procedure TCondenserClass.ParseDefinesFiles;
 var
+  InLines:    TStringList;
   TempLines:  TStringList;
-  Line:       Integer;
+  i,Line:     Integer;
   InBody:     Boolean;
 begin
-TempLines := TStringList.Create;
+InLines := TStringList.Create;
 try
-  InBody := False;
-  For Line := 0 to Pred(Lines.Count) do
-    begin
-      If AnsiSameText(Trim(Lines[Line]),COND_DEFTAG_BODY_START) then
-        begin
-          If not InBody then
-            InBody := True
-          else
-            raise TCONDInvalidParsingTag.Create('TCondenserClass.ParseDefinesFile: Body-start tag is not allowed here.');
-        end
-      else If AnsiSameText(Trim(Lines[Line]),COND_DEFTAG_BODY_END) then
-        begin
-          If InBody then
-            Inbody := False
-          else
-            raise TCONDInvalidParsingTag.Create('TCondenserClass.ParseDefinesFile: Body-end tag is not allowed here.');
-        end
-      else If InBody then
-        TempLines.Add(Lines[Line]);
-    end;
-  TrimLines(TempLines);
-  AppendLines(fCondDefines,TempLines,True);
+  TempLines := TStringList.Create;
+  try
+    For i := 0 to Pred(fDefinesFiles.Count) do
+      begin
+        InLines.LoadFromFile(StrToRTL(fDefinesFiles[i]));
+        TempLines.Clear;
+        For Line := 0 to Pred(InLines.Count) do
+          begin
+            If AnsiSameText(Trim(InLines[Line]),COND_DEFTAG_BODY_START) then
+              begin
+                If not InBody then
+                  InBody := True
+                else
+                  raise TCONDInvalidParsingTag.Create('TCondenserClass.ParseDefinesFiles: Body-start tag is not allowed here.');
+              end
+            else If AnsiSameText(Trim(InLines[Line]),COND_DEFTAG_BODY_END) then
+              begin
+                If InBody then
+                  Inbody := False
+                else
+                  raise TCONDInvalidParsingTag.Create('TCondenserClass.ParseDefinesFiles: Body-end tag is not allowed here.');
+              end
+            else If InBody then
+              TempLines.Add(InLines[Line]);
+          end;
+        TrimLines(TempLines);
+        AppendLines(fCondDefines,TempLines,True);
+      end;
+  finally
+    TempLines.Free;
+  end;
 finally
-  TempLines.Free;
+  InLines.Free;
 end;
 end;
 
@@ -172,17 +246,7 @@ end;
 
 procedure TCondenserClass.ParseFile(const FileName: String; Lines: TStrings; IsFirst: Boolean);
 const
-  COND_SRCTAG_START_UNIT           = '(*<unit>*)';
-  COND_SRCTAG_END_UNIT             = '(*</unit>*)';
-  COND_SRCTAG_START_INTERFACE      = '(*<interface>*)';
-  COND_SRCTAG_END_INTERFACE        = '(*</interface>*)';
-  COND_SRCTAG_START_IMPLEMENTATION = '(*<implementation>*)';
-  COND_SRCTAG_END_IMPLEMENTATION   = '(*</implementation>*)';
-  COND_SRCTAG_START_INITIALIZATION = '(*<initialization>*)';
-  COND_SRCTAG_END_INITIALIZATION   = '(*</initialization>*)';
-
   BAD_TAG_ERR = 'TCondenserClass.ParseFile: This tag (%d) is not allowed here (%d).';
-
 type
   TCONDParsingStage = (psInitial,psUnit,psInterface,psImplementation,psInitialization);
   TCONDParsingTag = (ptNone,ptUnitStart,ptUnitEnd,ptInterfaceStart,ptInterfaceEnd,
@@ -345,14 +409,6 @@ end;
 //------------------------------------------------------------------------------
 
 procedure TCondenserClass.ConstructOutput(OutLines: TStrings);
-const
-  // template tags
-  COND_TPLTAG_DESCRIPTION    = ('<description>');
-  COND_TPLTAG_UNITNAME       = ('<unit_name>');
-  COND_TPLTAG_DEFINES        = ('<defines>');
-  COND_TPLTAG_INTERFACE      = ('<interface>');
-  COND_TPLTAG_IMPLEMENTATION = ('<implementation>');
-  COND_TPLTAG_INITIALIZATION = ('<initialization>');
 var
   Line: Integer;
 begin
@@ -369,47 +425,133 @@ For Line := 0 to Pred(fOutTemplate.Count) do
     else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_IMPLEMENTATION) then
       AppendLines(OutLines,fCondImplementation,False)
     else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_INITIALIZATION) then
-      AppendLines(OutLines,fCondInitialization,False)
-    else
-      OutLines.Add(fOutTemplate[Line]);
+      begin
+        If fCondInitialization.Count > 0 then
+          begin
+            OutLines.Add(''); // spacing (there is always something before this section)
+            OutLines.Add('initialization');
+            AppendLines(OutLines,fCondInitialization,False)
+          end;
+      end
+    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_FINALIZATION) then
+      begin
+        If fCondFinalization.Count > 0 then
+          begin
+            OutLines.Add('');
+            OutLines.Add('finalization');
+            AppendLines(OutLines,fCondFinalization,False)
+          end;
+      end
+    else OutLines.Add(fOutTemplate[Line]);
   end;
 end;
 
 //------------------------------------------------------------------------------
 
 procedure TCondenserClass.Initialize;
+var
+  CmdLine:  TSCLPParser;
+  CmdData:  TSCLPParameter;
+  i:        Integer;
 begin
-fAddSplitters := False;
-fDebugRun := False;
+// create lists
 fSourceFiles := TStringList.Create;
-fDefinesFiles := TStringList.Create;
 fOutTemplate := TStringList.Create;
-fCondDefines := TStringList.Create;
+fDefinesFiles := TStringList.Create;
+// runtime lists
 fCondDescription := TStringList.Create;
+fCondDefines := TStringList.Create;
 fCondInterface := TStringList.Create;
 fCondImplementation := TStringList.Create;
 fCondInitialization := TStringList.Create;
-// load stuff from resources
-LoadStringsFromResources('source_files',fSourceFiles);
-LoadStringsFromResources('defines_files',fDefinesFiles);
-LoadStringsFromResources('out_template',fOutTemplate);
+fCondFinalization := TStringList.Create;
+// init parameters from command line
+CmdLine := TSCLPParser.Create;
+try
+  fCanRun := False;
+  If not CmdLine.CommandPresent('h','help') then
+    begin
+      // load and check mandatory parameters...
+      // source files
+      If not CmdLine.CommandDataShort('s',CmdData) then
+        raise TCONDMissingParameter.Create('TCondenserClass.Initialize: Missing mandatory parameter -s (source files).')
+      else If Length(CmdData.Arguments) <= 0 then
+        raise TCONDInvalidParameter.Create('TCondenserClass.Initialize: Invalid mandatory parameter -s (no source file).')
+      else
+        begin
+          For i := Low(CmdData.Arguments) to High(CmdData.Arguments) do
+            If FileExists(StrToRTL(CmdData.Arguments[i])) then
+              fSourceFiles.Add(CmdData.Arguments[i])
+            else
+              raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Source file "%s" does not exist.',[CmdData.Arguments[i]]);
+        end;
+      // output template file
+      If not CmdLine.CommandDataShort('t',CmdData) then
+        raise TCONDMissingParameter.Create('TCondenserClass.Initialize: Missing mandatory parameter -t (output template).')
+      else If Length(CmdData.Arguments) <> 1 then
+        raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Invalid mandatory parameter -t (invalid file count (%d)).',[Length(CmdData.Arguments)])
+      else If FileExists(StrToRTL(CmdData.Arguments[0])) then
+        fOutTemplate.LoadFromFile(StrToRTL(CmdData.Arguments[0]))
+      else
+        raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Template file "%s" does not exist.',[CmdData.Arguments[0]]);
+      // output file name
+      If not CmdLine.CommandDataShort('o',CmdData) then
+        raise TCONDMissingParameter.Create('TCondenserClass.Initialize: Missing mandatory parameter -o (output file name).')
+      else If Length(CmdData.Arguments) <> 1 then
+        raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Invalid mandatory parameter -o (invalid file count (%d)).',[Length(CmdData.Arguments)])
+      else
+        begin
+          fOutFileName := CmdData.Arguments[0];
+          fUnitName := RTLToStr(ChangeFileExt(ExtractFileName(StrToRTL(fOutFileName)),''));
+          If not CheckUnitName(fUnitName) then
+            raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Invalid unit name "%s",',[fUnitName]);
+        end;
+      // load and check optional parameters...
+      fAddSplitters := CmdLine.CommandPresentLong('split');
+      fDebugRun := CmdLine.CommandPresentLong('debug');
+      // defines files
+      If CmdLine.CommandDataShort('d',CmdData) then
+        begin
+          For i := Low(CmdData.Arguments) to High(CmdData.Arguments) do
+            If FileExists(StrToRTL(CmdData.Arguments[i])) then
+              fDefinesFiles.Add(CmdData.Arguments[i])
+            else
+              raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Defines file "%s" does not exist.',[CmdData.Arguments[i]]);
+        end;
+      // desription file
+      If CmdLine.CommandDataShort('c',CmdData) then
+        begin
+          If FileExists(StrToRTL(CmdData.Arguments[0])) then
+            fDescriptionFile := CmdData.Arguments[0]
+          else
+            raise TCONDInvalidParameter.CreateFmt('TCondenserClass.Initialize: Description file "%s" does not exist.',[CmdData.Arguments[0]]);
+        end
+      else fDescriptionFile := '';
+      fCanRun := True;
+    end;
+finally
+  CmdLine.Free;
+end;  
 end;
 
 //------------------------------------------------------------------------------
 
 procedure TCondenserClass.Finalize;
 begin
+fCondFinalization.Free;
 fCondInitialization.Free;
 fCondImplementation.Free;
 fCondInterface.Free;
-fCondDescription.Free;
 fCondDefines.Free;
-fOutTemplate.Free;
+fCondDescription.Free;
 fDefinesFiles.Free;
+fOutTemplate.Free;
 fSourceFiles.Free;
 end;
 
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    TCondenserClass - public methods
+-------------------------------------------------------------------------------}
 
 constructor TCondenserClass.Create;
 begin
@@ -427,50 +569,48 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure TCondenserClass.Run(const UnitName: String);
+procedure TCondenserClass.Run;
 var
   i:      Integer;
-  Input:  TStringList;
   Output: TStringList;
 begin
-If CheckUnitName(UnitName) then
-  begin
-    fUnitName := UnitName;
-    fCondDefines.Clear;    
-    fCondDescription.Clear;
-    fCondInterface.Clear;
-    fCondImplementation.Clear;
-    fCondInitialization.Clear;
-    Input := TStringList.Create;
-    try
-      // traverse defines files and join them
-      For i := 0 to Pred(fDefinesFiles.Count) do
-        begin
-          Input.Clear;  // not really needed, but to be sure
-          Input.LoadFromFile(fDefinesFiles[i]);
-          ParseDefinesFile(Input);
-        end;
-      // traverse source files, load and parse their content
-      For i := 0 to Pred(fSourceFiles.Count) do
-        begin
-          Input.Clear;
-          Input.LoadFromFile(fSourceFiles[i]);
-          ParseFile(ExtractFileName(fSourceFiles[i]),Input,i <= 0);
-        end;
-    finally
-      Input.Free;
+fCondDescription.Clear;
+fCondDefines.Clear;
+fCondInterface.Clear;
+fCondImplementation.Clear;
+fCondInitialization.Clear;
+fCondFinalization.Clear;
+
+  If Length(fDescriptionFile) > 0 then
+    ParseDescriptionFile;
+  If fDefinesFiles.Count > 0 then
+    ParseDefinesFiles;
+(*
+  // traverse defines files and join them
+  For i := 0 to Pred(fDefinesFiles.Count) do
+    begin
+      Input.Clear;  // not really needed, but to be sure
+      Input.LoadFromFile(fDefinesFiles[i]);
+      ParseDefinesFile(Input);
     end;
-    // construct and save the output
-    Output := TStringList.Create;
-    try
-      ConstructOutput(Output);
-      If not fDebugRun then
-        Output.SaveToFile(UnitName + '.pas');
-    finally
-      Output.Free;
+  // traverse source files, load and parse their content
+  For i := 0 to Pred(fSourceFiles.Count) do
+    begin
+      Input.Clear;
+      Input.LoadFromFile(fSourceFiles[i]);
+      ParseFile(ExtractFileName(fSourceFiles[i]),Input,i <= 0);
     end;
-  end
-else TCONDInvalidUnitName.CreateFmt('TCondenserClass.Run: Invalid unit name "%s".',[UnitName]);
+*)
+
+// construct and save the output
+Output := TStringList.Create;
+try
+  ConstructOutput(Output);
+  If not fDebugRun then
+    Output.SaveToFile(StrToRTL(fUnitName) + '.pas');
+finally
+  Output.Free;
+end;
 end;
 
 end.

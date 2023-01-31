@@ -1,1 +1,0 @@
-windres -o condenser.res -i condenser.rc -I condenser

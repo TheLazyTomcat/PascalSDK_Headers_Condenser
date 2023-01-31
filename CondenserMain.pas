@@ -32,23 +32,28 @@ end;
 procedure ShowHelp;
 begin
 WriteLn;
-WriteLn('Usage:');
+WriteLn('usage:');
 WriteLn;
-WriteLn('  condenser [parameters] output');
-Writeln;
-WriteLn('    parameters (all are optional):');
+WriteLn('  condenser [opt_params] -s source_files -t template_file -o output_file');
 WriteLn;
-WriteLn('      -h, --help  ... shows this help text (supresses processing if present)');
-WriteLn('      -s, --split ... add splitters (code decoration) to output');
-WriteLn('      -c, --descr ... add unit description from the first header file');
-WriteLn('          --debug ... debug run only (full processing, but nothing is saved)');
+WriteLn('    optional parameters (opt_params):');
 WriteLn;
-WriteLn('    outfile - name of a unit to which the condesed headers will be stored');
-WriteLn('              (created in the current directory, must conform to unit naming');
-writeln('               convetions - eg. no white spaces, no diacritics, ...)');
+WriteLn('      -h  --help      shows this help text (supresses processing if present)');
+WriteLn('          --split     add splitters (code decoration) to output');
+WriteLn('          --debug     debug run only (full processing, but nothing is saved)');
 WriteLn;
+WriteLn('      -d define_files     files from which defines will be loaded');
+WriteLn('      -c source_file      source file from which to load a description');
 WriteLn;
-Write('Press enter to exit...'); ReadLn;
+WriteLn('    mandatory parameters:');
+WriteLn;
+WriteLn('      -s source_files      list of source files (headers) to be condensed');
+WriteLn('      -t template_file     file containing template for the output');
+WriteLn('      -o output_file       file to which the condensed headers will be saved');
+WriteLn;
+WriteLn('For more details, consult readme.txt file distributed with this program.');
+WriteLn;
+Write('Press enter to continue...'); ReadLn;
 end;
 
 //------------------------------------------------------------------------------
@@ -62,19 +67,14 @@ try
   ShowProgramHead;
   CmdParams := TSCLPParser.Create;
   try
-    If not CmdParams.CommandPresent('h','help') and ((CmdParams.Count > 1) and (CmdParams.Last.ParamType = ptGeneral)) then
+    If CmdParams.CommandCount > 0 then
       begin
-        WriteLn;
-        WriteLn('Preparing condenser...');
         Condenser := TCondenserClass.Create;
         try
-          // set condenser parameters from command line
-          Condenser.AddSplitters := CmdParams.CommandPresent('s','split');
-          Condenser.AddUnitDescription := CmdParams.CommandPresent('c','descr');
-          Condenser.DebugRun := CmdParams.CommandPresentLong('debug');
-          WriteLn;
-          WriteLn('Condensing files...');
-          Condenser.Run(CmdParams.Last.Str);
+          If Condenser.CanRun then
+            begin
+            end
+          else ShowHelp;
         finally
           Condenser.Free;
         end;
