@@ -29,7 +29,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure ShowHelp;
+procedure ShowProgramHelp;
 begin
 WriteLn;
 WriteLn('usage:');
@@ -73,19 +73,24 @@ try
         try
           If Condenser.CanRun then
             begin
+              WriteLn;
+              WriteLn('running condenser...');
+              Condenser.Run;
+              ExitCode := 0;
             end
-          else ShowHelp;
+          else ShowProgramHelp;
         finally
           Condenser.Free;
         end;
       end
-    else ShowHelp;
+    else ShowProgramHelp;
   finally
     CmdParams.Free;
   end;
 except
   on E: Exception do
     begin
+      ExitCode := -1;
       WriteLn;
       WriteLn(' Error - ',E.ClassName,': ',StrToCSL(E.Message));
       WriteLn;

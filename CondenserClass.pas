@@ -53,7 +53,7 @@ type
     fCondFinalization:    TStringList;
     procedure ParseDescriptionFile; virtual;
     procedure ParseDefinesFiles; virtual;
-    procedure ParseFile(const FileName: String; Lines: TStrings; IsFirst: Boolean); virtual;
+    procedure ParseSourceFiles; virtual;
     procedure ConstructOutput(OutLines: TStrings); virtual;
     procedure Initialize; virtual;
     procedure Finalize; virtual;
@@ -109,18 +109,6 @@ const
     TCondenserClass - auxiliary functions
 ===============================================================================}
 
-Function CharInSet(C: Char; S: TSysCharSet): Boolean;
-begin
-{$IF SizeOf(Char) <> 1}
-If Ord(C) > 255 then
-  Result := False
-else
-{$IFEND}
-  Result := AnsiChar(C) in S;
-end;
- 
-//------------------------------------------------------------------------------
-
 procedure TrimLines(Lines: TStrings);
 var
   i:  Integer;
@@ -141,32 +129,13 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure AppendLines(ToLines,FromLines: TStrings; Spacing: Boolean);
+procedure AppendLines(ToLines,FromLines: TStrings);
 var
   i:  Integer;
 begin
 If FromLines.Count > 0 then
-  begin
-    If Spacing and (ToLines.Count > 0) then
-      ToLines.Add('');
-    For i := 0 to Pred(FromLines.Count) do
-      ToLines.Add(FromLines[i]);
-  end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function CheckUnitName(const UnitName: String): Boolean;
-var
-  i:  Integer;
-begin
-Result := False;
-If (Length(UnitName) > 0) and (Length(UnitName) <= 128) then
-  If CharInSet(UnitName[1],['a'..'b','A'..'B','_']) then
-    For i := 1 to Length(UnitName) do
-      If not CharInSet(UnitName[i],['a'..'b','A'..'B','0'..'9','_']) then
-        Exit{with result being false};
-Result := True;
+  For i := 0 to Pred(FromLines.Count) do
+    ToLines.Add(FromLines[i]);
 end;
 
 {===============================================================================
@@ -185,11 +154,11 @@ InLines := TStringList.Create;
 try
   InLines.LoadFromFile(StrToRTL(fDescriptionFile));
   TrimLines(InLines);
-  For Line := 1 to Pred(InLines.Count) do
+  For Line := 0 to Pred(InLines.Count) do
     If not AnsiSameText(Trim(InLines[Line]),COND_SRCTAG_START_UNIT) then
       fCondDescription.Add(InLines[Line])
     else
-      Break{for i};
+      Break{For Line};
 finally
   InLines.Free;
 end;
@@ -212,6 +181,7 @@ try
       begin
         InLines.LoadFromFile(StrToRTL(fDefinesFiles[i]));
         TempLines.Clear;
+        InBody := False;
         For Line := 0 to Pred(InLines.Count) do
           begin
             If AnsiSameText(Trim(InLines[Line]),COND_DEFTAG_BODY_START) then
@@ -232,7 +202,11 @@ try
               TempLines.Add(InLines[Line]);
           end;
         TrimLines(TempLines);
-        AppendLines(fCondDefines,TempLines,True);
+        If TempLines.Count > 0 then
+          begin
+            fCondDefines.Add('');
+            AppendLines(fCondDefines,TempLines);
+          end;
       end;
   finally
     TempLines.Free;
@@ -244,165 +218,216 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure TCondenserClass.ParseFile(const FileName: String; Lines: TStrings; IsFirst: Boolean);
+procedure TCondenserClass.ParseSourceFiles;
 const
-  BAD_TAG_ERR = 'TCondenserClass.ParseFile: This tag (%d) is not allowed here (%d).';
+  BAD_TAG_ERR = 'TCondenserClass.ParseSourceFiles: This tag (%d) is not allowed here (%d).';
 type
-  TCONDParsingStage = (psInitial,psUnit,psInterface,psImplementation,psInitialization);
+  TCONDParsingStage = (psInitial,psUnit,psInterface,psImplementation,psInitialization,psFinalization);
   TCONDParsingTag = (ptNone,ptUnitStart,ptUnitEnd,ptInterfaceStart,ptInterfaceEnd,
                      ptImplementationStart,ptImplementationEnd,ptInitializationStart,
-                     ptInitializationEnd);
+                     ptInitializationEnd,ptFinalizationStart,ptFinalizationEnd);
 
-  Function GetLineTag(Line: Integer): TCONDParsingTag;
+  Function GetLineTag(const LineText: String): TCONDParsingTag;
   begin
-    If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_START_UNIT) then
+    If AnsiSameText(LineText,COND_SRCTAG_START_UNIT) then
       Result := ptUnitStart
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_END_UNIT) then
+    else If AnsiSameText(LineText,COND_SRCTAG_END_UNIT) then
       Result := ptUnitEnd
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_START_INTERFACE) then
+    else If AnsiSameText(LineText,COND_SRCTAG_START_INTERFACE) then
       Result := ptInterfaceStart
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_END_INTERFACE) then
+    else If AnsiSameText(LineText,COND_SRCTAG_END_INTERFACE) then
       Result := ptInterfaceEnd
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_START_IMPLEMENTATION) then
+    else If AnsiSameText(LineText,COND_SRCTAG_START_IMPLEMENTATION) then
       Result := ptImplementationStart
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_END_IMPLEMENTATION) then
+    else If AnsiSameText(LineText,COND_SRCTAG_END_IMPLEMENTATION) then
       Result := ptImplementationEnd
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_START_INITIALIZATION) then
+    else If AnsiSameText(LineText,COND_SRCTAG_START_INITIALIZATION) then
       Result := ptInitializationStart
-    else If AnsiSameText(Trim(Lines[Line]),COND_SRCTAG_END_INITIALIZATION) then
+    else If AnsiSameText(LineText,COND_SRCTAG_END_INITIALIZATION) then
       Result := ptInitializationEnd
+    else If AnsiSameText(LineText,COND_SRCTAG_START_FINALIZATION) then
+      Result := ptFinalizationStart
+    else If AnsiSameText(LineText,COND_SRCTAG_END_INITIALIZATION) then
+      Result := ptFinalizationEnd
     else
       Result := ptNone;
   end;
 
 var
+  i:                    Integer;
   CurrentStage:         TCONDParsingStage;
   CurrentTag:           TCONDParsingTag;
   Line:                 Integer;
-  DescriptionLocal:     TStringList;
+  InLines:              TStringList;
   InterfaceLocal:       TStringList;
   ImplementationLocal:  TStringList;
   InitializationLocal:  TStringList;
+  FinalizationLocal:    TStringList;
 
-  procedure InitLocalLists;
+  procedure CreateLocalLists;
   begin
-    DescriptionLocal := nil;
     InterfaceLocal := nil;
     ImplementationLocal := nil;
     InitializationLocal := nil;
-    DescriptionLocal := TStringList.Create;
+    FinalizationLocal := nil;
     InterfaceLocal := TStringList.Create;
     ImplementationLocal := TStringList.Create;
     InitializationLocal := TStringList.Create;
+    FinalizationLocal := TStringList.Create;
   end;
 
-  procedure FinalLocalLists;
+  procedure ClearLocalLists;
   begin
+    InterfaceLocal.Clear;
+    ImplementationLocal.Clear;
+    InitializationLocal.Clear;
+    FinalizationLocal.Clear;
+  end;
+
+  procedure DestroyLocalLists;
+  begin
+    FinalizationLocal.Free;
     InitializationLocal.Free;
     ImplementationLocal.Free;
     InterfaceLocal.Free;
-    DescriptionLocal.Free;
+  end;
+
+  procedure AppendSplitter(Lines: TStrings; const FileName: String; SmallSplitter: Boolean);
+  begin
+    If not SmallSplitter then
+      begin
+        Lines.Add('{' + StringOfChar('-',79));
+        Lines.Add('  ' + FileName);
+        Lines.Add(StringOfChar('-',79) + '}');
+        Lines.Add('');
+      end
+    else Lines.Add('  //- ' + FileName + ' ' + StringOfChar('-',73 - Length(FileName)));
   end;
 
 begin
-InitLocalLists;
+InLines := TStringList.Create;
 try
-  CurrentStage := psInitial;
-  For Line := 0 to Pred(Lines.Count) do
-    begin
-      case CurrentStage of
-      //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-        psInitial:
-          begin
-            CurrentTag := GetLineTag(Line);
-            case GetLineTag(Line) of
-              ptNone:       If IsFirst then
-                              DescriptionLocal.Add(Lines[Line]);
-              ptUnitStart:  CurrentStage := psUnit;
-            else
-              raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
-            end;
+  CreateLocalLists;
+  try
+    For i := 0 to Pred(fSourceFiles.Count) do
+      begin
+        InLines.LoadFromFile(StrToRTL(fSourceFiles[i]));
+        ClearLocalLists;
+        CurrentStage := psInitial;
+        For Line := 0 to Pred(InLines.Count) do
+          case CurrentStage of
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psInitial:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:       {do nothing};
+                  ptUnitStart:  CurrentStage := psUnit;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psUnit:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:                 {do nothing};
+                  ptUnitEnd:              Break{For Line};
+                  ptInterfaceStart:       CurrentStage := psInterface;
+                  ptImplementationStart:  CurrentStage := psImplementation;
+                  ptInitializationStart:  CurrentStage := psInitialization;
+                  ptFinalizationStart:    CurrentStage := psFinalization;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psInterface:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:         InterfaceLocal.Add(InLines[Line]);
+                  ptInterfaceEnd: CurrentStage := psUnit;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psImplementation:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:               ImplementationLocal.Add(InLines[Line]);
+                  ptImplementationEnd:  CurrentStage := psUnit;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psInitialization:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:               InitializationLocal.Add(InLines[Line]);
+                  ptInitializationEnd:  CurrentStage := psUnit;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+            psFinalization:
+              begin
+                CurrentTag := GetLineTag(Trim(InLines[Line]));
+                case CurrentTag of
+                  ptNone:             FinalizationLocal.Add(InLines[Line]);
+                  ptFinalizationEnd:  CurrentStage := psUnit;
+                else
+                  raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
+                end;
+              end;
+          //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+          else
+            raise TCONDInvalidParsingStage.CreateFmt('TCondenserClass.ParseFile: Invalid parsing stage (%d).',[Ord(CurrentStage)]);
           end;
-      //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-        psUnit:
+        // trim the obtained lines
+        TrimLines(InterfaceLocal);
+        TrimLines(ImplementationLocal);
+        TrimLines(InitializationLocal);
+        TrimLines(FinalizationLocal);
+        // append the lines to global line lists, add splitters if allowed
+        If InterfaceLocal.Count > 0 then
           begin
-            CurrentTag := GetLineTag(Line);
-            case CurrentTag of
-              ptNone:                 {do nothing};
-              ptUnitEnd:              Break{For Line};
-              ptInterfaceStart:       CurrentStage := psInterface;
-              ptImplementationStart:  CurrentStage := psImplementation;
-              ptInitializationStart:  CurrentStage := psInitialization;
-            else
-              raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
-            end;
+            fCondInterface.Add('');
+            If fAddSplitters then
+              AppendSplitter(fCondInterface,fSourceFiles[i],False);
+            AppendLines(fCondInterface,InterfaceLocal);
           end;
-      //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-        psInterface:
+        If ImplementationLocal.Count > 0 then
           begin
-            CurrentTag := GetLineTag(Line);
-            case CurrentTag of
-              ptNone:         InterfaceLocal.Add(Lines[Line]);
-              ptInterfaceEnd: CurrentStage := psUnit;
-            else
-              raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
-            end;
+            fCondImplementation.Add('');
+            If fAddSplitters then
+              AppendSplitter(fCondImplementation,fSourceFiles[i],False);
+            AppendLines(fCondImplementation,ImplementationLocal);
           end;
-      //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-        psImplementation:
+        If InitializationLocal.Count > 0 then
           begin
-            CurrentTag := GetLineTag(Line);
-            case CurrentTag of
-              ptNone:               ImplementationLocal.Add(Lines[Line]);
-              ptImplementationEnd:  CurrentStage := psUnit;
-            else
-              raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
-            end;
+            If fAddSplitters then
+              AppendSplitter(fCondInitialization,fSourceFiles[i],True);
+            AppendLines(fCondInitialization,InitializationLocal);
           end;
-      //  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-        psInitialization:
+        If FinalizationLocal.Count > 0 then
           begin
-            CurrentTag := GetLineTag(Line);
-            case CurrentTag of
-              ptNone:               InitializationLocal.Add(Lines[Line]);
-              ptInitializationEnd:  CurrentStage := psUnit;
-            else
-              raise TCONDInvalidParsingTag.CreateFmt(BAD_TAG_ERR,[Ord(CurrentTag),Ord(CurrentStage)]);
-            end;
+            If fAddSplitters then
+              AppendSplitter(fCondFinalization,fSourceFiles[i],True);
+            AppendLines(fCondFinalization,FinalizationLocal);
           end;
-      else
-        raise TCONDInvalidParsingStage.CreateFmt('TCondenserClass.ParseFile: Invalid parsing stage (%d).',[Ord(CurrentStage)]);
       end;
-    end;
-  TrimLines(DescriptionLocal);
-  TrimLines(InterfaceLocal);
-  TrimLines(ImplementationLocal);
-  TrimLines(InitializationLocal);
-  If InterfaceLocal.Count > 0 then
-    begin
-      If fCondInterface.Count > 0 then
-        fCondInterface.Add(''); 
-      If fAddSplitters then
-        fCondInterface.Add(Format('{%s  %s%s}%s',[StringOfChar('-',79) + sLineBreak,
-          FileName,sLineBreak + StringOfChar('-',79),sLineBreak]));
-    end;
-  If ImplementationLocal.Count > 0 then
-    begin
-      If fCondImplementation.Count > 0 then
-        fCondImplementation.Add('');
-      If fAddSplitters then
-        fCondImplementation.Add(Format('{%s  %s%s}%s',[StringOfChar('-',79) + sLineBreak,
-          FileName,sLineBreak + StringOfChar('-',79),sLineBreak]));
-    end;
-  If InitializationLocal.Count > 0 then
-    fCondInitialization.Add('  //- ' + FileName + ' ' + StringOfChar('-',73 - Length(FileName)));
-  If IsFirst then
-    fCondDescription.Assign(DescriptionLocal);
-  AppendLines(fCondInterface,InterfaceLocal,False);
-  AppendLines(fCondImplementation,ImplementationLocal,False);
-  AppendLines(fCondInitialization,InitializationLocal,False);
+  finally
+    DestroyLocalLists;
+  end;
 finally
-  FinalLocalLists;
+  InLines.Free;
 end;
 end;
 
@@ -414,32 +439,32 @@ var
 begin
 For Line := 0 to Pred(fOutTemplate.Count) do
   begin
-    If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_DESCRIPTION) then
-      AppendLines(OutLines,fCondDescription,False)
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_UNITNAME) then
-      OutLines.Add(Format('unit %s',[fUnitName]))
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_DEFINES) then
-      AppendLines(OutLines,fCondDefines,False)
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_INTERFACE) then
-      AppendLines(OutLines,fCondInterface,False)
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_IMPLEMENTATION) then
-      AppendLines(OutLines,fCondImplementation,False)
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_INITIALIZATION) then
+    If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_DESCRIPTION) then
+      AppendLines(OutLines,fCondDescription)
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_UNITNAME) then
+      OutLines.Add(Format('unit %s;',[fUnitName]))
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_DEFINES) then
+      AppendLines(OutLines,fCondDefines)
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_INTERFACE) then
+      AppendLines(OutLines,fCondInterface)
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_IMPLEMENTATION) then
+      AppendLines(OutLines,fCondImplementation)
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_INITIALIZATION) then
       begin
         If fCondInitialization.Count > 0 then
           begin
             OutLines.Add(''); // spacing (there is always something before this section)
             OutLines.Add('initialization');
-            AppendLines(OutLines,fCondInitialization,False)
+            AppendLines(OutLines,fCondInitialization)
           end;
       end
-    else If AnsiSameText(fOutTemplate[Line],COND_TPLTAG_FINALIZATION) then
+    else If AnsiSameText(Trim(fOutTemplate[Line]),COND_TPLTAG_FINALIZATION) then
       begin
         If fCondFinalization.Count > 0 then
           begin
             OutLines.Add('');
             OutLines.Add('finalization');
-            AppendLines(OutLines,fCondFinalization,False)
+            AppendLines(OutLines,fCondFinalization)
           end;
       end
     else OutLines.Add(fOutTemplate[Line]);
@@ -449,6 +474,31 @@ end;
 //------------------------------------------------------------------------------
 
 procedure TCondenserClass.Initialize;
+
+  Function CheckUnitName(const UnitName: String): Boolean;
+
+    Function CharInSet(C: Char; S: TSysCharSet): Boolean;
+    begin
+      {$IF SizeOf(Char) <> 1}
+      If Ord(C) > 255 then
+        Result := False
+      else
+      {$IFEND}
+        Result := AnsiChar(C) in S;
+    end;
+    
+  var
+    i:  Integer;
+  begin
+    Result := False;
+    If (Length(UnitName) > 0) and (Length(UnitName) <= 128) then
+      If CharInSet(UnitName[1],['a'..'b','A'..'B','_']) then
+        For i := 1 to Length(UnitName) do
+          If not CharInSet(UnitName[i],['a'..'b','A'..'B','0'..'9','_']) then
+            Exit{with result being false};
+    Result := True;
+  end;
+
 var
   CmdLine:  TSCLPParser;
   CmdData:  TSCLPParameter;
@@ -571,43 +621,27 @@ end;
 
 procedure TCondenserClass.Run;
 var
-  i:      Integer;
   Output: TStringList;
 begin
+// prepare lines lists
 fCondDescription.Clear;
 fCondDefines.Clear;
 fCondInterface.Clear;
 fCondImplementation.Clear;
 fCondInitialization.Clear;
 fCondFinalization.Clear;
-
-  If Length(fDescriptionFile) > 0 then
-    ParseDescriptionFile;
-  If fDefinesFiles.Count > 0 then
-    ParseDefinesFiles;
-(*
-  // traverse defines files and join them
-  For i := 0 to Pred(fDefinesFiles.Count) do
-    begin
-      Input.Clear;  // not really needed, but to be sure
-      Input.LoadFromFile(fDefinesFiles[i]);
-      ParseDefinesFile(Input);
-    end;
-  // traverse source files, load and parse their content
-  For i := 0 to Pred(fSourceFiles.Count) do
-    begin
-      Input.Clear;
-      Input.LoadFromFile(fSourceFiles[i]);
-      ParseFile(ExtractFileName(fSourceFiles[i]),Input,i <= 0);
-    end;
-*)
-
+// parsing
+If Length(fDescriptionFile) > 0 then
+  ParseDescriptionFile;
+If fDefinesFiles.Count > 0 then
+  ParseDefinesFiles;
+ParseSourceFiles;
 // construct and save the output
 Output := TStringList.Create;
 try
   ConstructOutput(Output);
   If not fDebugRun then
-    Output.SaveToFile(StrToRTL(fUnitName) + '.pas');
+    Output.SaveToFile(StrToRTL(fOutFileName));
 finally
   Output.Free;
 end;
