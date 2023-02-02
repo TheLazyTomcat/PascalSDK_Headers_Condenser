@@ -1,3 +1,10 @@
+{-------------------------------------------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+-------------------------------------------------------------------------------}
 unit CondenserMain;
 
 {$IFDEF FPC}
@@ -18,13 +25,13 @@ uses
 
 procedure ShowProgramHead;
 begin
-WriteLn('****************************************');
-WriteLn('*                                      *');
-WriteLn('*  TelemetrySDK Headers Condenser 1.0  *');
-WriteLn('*                                      *');
-WriteLn('*        (c)2023 Frantisek Milt        *');
-WriteLn('*                                      *');
-WriteLn('****************************************');
+WriteLn('*************************************');
+WriteLn('*                                   *');
+WriteLn('*  PascalSDK Headers Condenser 1.0  *');
+WriteLn('*                                   *');
+WriteLn('*      (c)2023 Frantisek Milt       *');
+WriteLn('*                                   *');
+WriteLn('*************************************');
 end;
 
 //------------------------------------------------------------------------------
@@ -36,6 +43,12 @@ WriteLn('usage:');
 WriteLn;
 WriteLn('  condenser [opt_params] -s source_files -t template_file -o output_file');
 WriteLn;
+WriteLn('    mandatory parameters:');
+WriteLn;
+WriteLn('      -s source_files      list of source files (headers) to be condensed');
+WriteLn('      -t template_file     file containing template for the output');
+WriteLn('      -o output_file       file to which the condensed headers will be saved');
+WriteLn;
 WriteLn('    optional parameters (opt_params):');
 WriteLn;
 WriteLn('      -h  --help      shows this help text (supresses processing if present)');
@@ -44,12 +57,6 @@ WriteLn('          --debug     debug run only (full processing, but nothing is s
 WriteLn;
 WriteLn('      -d define_files     files from which defines will be loaded');
 WriteLn('      -c source_file      source file from which to load a description');
-WriteLn;
-WriteLn('    mandatory parameters:');
-WriteLn;
-WriteLn('      -s source_files      list of source files (headers) to be condensed');
-WriteLn('      -t template_file     file containing template for the output');
-WriteLn('      -o output_file       file to which the condensed headers will be saved');
 WriteLn;
 WriteLn('For more details, consult readme.txt file distributed with this program.');
 WriteLn;

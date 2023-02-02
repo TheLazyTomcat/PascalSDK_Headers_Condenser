@@ -1,3 +1,10 @@
+{-------------------------------------------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+-------------------------------------------------------------------------------}
 unit CondenserClass;
 
 {$IFDEF FPC}
@@ -247,7 +254,7 @@ type
       Result := ptInitializationEnd
     else If AnsiSameText(LineText,COND_SRCTAG_START_FINALIZATION) then
       Result := ptFinalizationStart
-    else If AnsiSameText(LineText,COND_SRCTAG_END_INITIALIZATION) then
+    else If AnsiSameText(LineText,COND_SRCTAG_END_FINALIZATION) then
       Result := ptFinalizationEnd
     else
       Result := ptNone;

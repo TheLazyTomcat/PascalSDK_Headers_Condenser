@@ -7,12 +7,16 @@
 -------------------------------------------------------------------------------}
 program Condenser;
 
-{$APPTYPE CONSOLE}
+{$mode objfpc}{$H+}
 
 uses
-  CondenserMain in '..\CondenserMain.pas',
-  CondenserClass in '..\CondenserClass.pas';
+  {$IFDEF UNIX}{$IFDEF UseCThreads}
+  cthreads,
+  {$ENDIF}{$ENDIF}
+  Classes, CondenserMain, CondenserClass
+  { you can add units after this };
 
 begin
   CondenserMain.Main;
 end.
+
